@@ -1,0 +1,933 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>二维课题组药品管理系统</title>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,400,500,700&display=swap" />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/icon?family=Material+Icons" />
+    <script src="https://unpkg.com/react@17/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@17/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://unpkg.com/@mui/material@5.2.0/umd/material-ui.production.min.js"></script>
+    <!-- 引入SheetJS库用于Excel导出 -->
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: 'Roboto', sans-serif;
+            background-color: #f5f5f5;
+            font-size: 14px;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 15px;
+        }
+        .header {
+            text-align: center;
+            margin-bottom: 20px;
+            color: #2c387e;
+            font-size: 1.8rem;
+        }
+        .low-stock {
+            background-color: #ffebee !important;
+        }
+        .critical-stock {
+            background-color: #ffcdd2 !important;
+            animation: pulse 1.5s infinite;
+        }
+        @keyframes pulse {
+            0% { background-color: #ffcdd2; }
+            50% { background-color: #ff9a9e; }
+            100% { background-color: #ffcdd2; }
+        }
+        .login-container {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background-color: #f5f5f5;
+            padding: 15px;
+        }
+        .login-form {
+            background: white;
+            padding: 25px;
+            border-radius: 8px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+            width: 100%;
+            max-width: 350px;
+        }
+        .guide-container {
+            background-color: #e3f2fd;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 15px 0;
+        }
+        .button-group {
+            display: flex;
+            gap: 8px;
+            margin: 10px 0;
+            flex-wrap: wrap;
+        }
+        .stock-info {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+        .edit-conversion-btn {
+            cursor: pointer;
+            color: #2196f3;
+            margin-left: 5px;
+        }
+        
+        /* 响应式调整 */
+        @media (max-width: 768px) {
+            .container {
+                padding: 10px;
+            }
+            .header {
+                font-size: 1.5rem;
+                margin-bottom: 15px;
+            }
+            .button-group {
+                flex-direction: column;
+                gap: 5px;
+            }
+            .button-group button {
+                width: 100%;
+            }
+            .MuiTableCell-root {
+                padding: 8px 4px;
+            }
+            .MuiTypography-h6 {
+                font-size: 1rem;
+            }
+            .MuiTableCell-alignCenter {
+                text-align: center !important;
+            }
+        }
+        
+        @media (max-width: 480px) {
+            .container {
+                padding: 5px;
+            }
+            .header {
+                font-size: 1.3rem;
+            }
+            .login-form {
+                padding: 15px;
+            }
+            .guide-container {
+                padding: 10px;
+            }
+        }
+        
+        /* 移动端表格优化 */
+        .table-responsive {
+            overflow-x: auto;
+            width: 100%;
+        }
+        
+        .accumulated-info {
+            font-size: 0.8rem;
+            color: #666;
+            margin-top: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+        const {
+            Box,
+            Button,
+            TextField,
+            Paper,
+            Table,
+            TableBody,
+            TableCell,
+            TableContainer,
+            TableHead,
+            TableRow,
+            Typography,
+            AppBar,
+            Toolbar,
+            Dialog,
+            DialogTitle,
+            DialogContent,
+            DialogActions,
+            Alert,
+            CircularProgress,
+            Chip,
+            IconButton
+        } = MaterialUI;
+
+        // 密码
+        const USER_PASSWORD = "USTB2025";
+        const ADMIN_PASSWORD = "USTB0910";
+
+        // 主应用组件
+        function App() {
+            const [isAuthenticated, setIsAuthenticated] = useState(false);
+            const [isAdmin, setIsAdmin] = useState(false);
+            const [password, setPassword] = useState("");
+            const [drugs, setDrugs] = useState([]);
+            const [openAddDialog, setOpenAddDialog] = useState(false);
+            const [newDrugName, setNewDrugName] = useState("");
+            const [newDrugConversion, setNewDrugConversion] = useState(5);
+            const [editingDrug, setEditingDrug] = useState(null);
+            const [refillDialogOpen, setRefillDialogOpen] = useState(false);
+            const [refillerName, setRefillerName] = useState("");
+            const [refillBottles, setRefillBottles] = useState(1);
+            const [adminPassword, setAdminPassword] = useState("");
+            const [adminDialogOpen, setAdminDialogOpen] = useState(false);
+            const [alerts, setAlerts] = useState([]);
+            const [showGuide, setShowGuide] = useState(true);
+            const [loading, setLoading] = useState(false);
+            const [syncStatus, setSyncStatus] = useState('local');
+            const [bulkAddDialogOpen, setBulkAddDialogOpen] = useState(false);
+            const [bulkAddQuantity, setBulkAddQuantity] = useState(1);
+            const [editConversionDialogOpen, setEditConversionDialogOpen] = useState(false);
+            const [editConversionValue, setEditConversionValue] = useState(5);
+
+            // 组件加载时获取数据
+            useEffect(() => {
+                initializeData();
+            }, []);
+
+            // 初始化数据
+            const initializeData = () => {
+                setLoading(true);
+                
+                try {
+                    // 尝试从本地存储获取
+                    const storedDrugs = localStorage.getItem('lab_drugs');
+                    if (storedDrugs) {
+                        const parsedDrugs = JSON.parse(storedDrugs);
+                        // 确保所有药品都有必要的属性
+                        const validatedDrugs = parsedDrugs.map(drug => ({
+                            ...drug,
+                            conversionFactor: drug.conversionFactor || 5,
+                            accumulatedBottles: drug.accumulatedBottles || 0, // 添加累积瓶数字段
+                            refills: drug.refills || [],
+                            stockAdditions: drug.stockAdditions || []
+                        }));
+                        setDrugs(validatedDrugs);
+                    } else {
+                        // 默认药品数据
+                        const defaultDrugs = [
+                            { 
+                                id: 1, 
+                                name: "丙醇", 
+                                quantity: 15,
+                                conversionFactor: 5,
+                                accumulatedBottles: 0,
+                                refills: [],
+                                stockAdditions: []
+                            },
+                            { 
+                                id: 2, 
+                                name: "异丙酮", 
+                                quantity: 8,
+                                conversionFactor: 5,
+                                accumulatedBottles: 0,
+                                refills: [],
+                                stockAdditions: []
+                            },
+                            { 
+                                id: 3, 
+                                name: "乙醇", 
+                                quantity: 12,
+                                conversionFactor: 5,
+                                accumulatedBottles: 0,
+                                refills: [],
+                                stockAdditions: []
+                            }
+                        ];
+                        setDrugs(defaultDrugs);
+                        localStorage.setItem('lab_drugs', JSON.stringify(defaultDrugs));
+                    }
+                    setSyncStatus('success');
+                } catch (error) {
+                    console.error("初始化数据失败:", error);
+                    setSyncStatus('error');
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            // 保存数据到本地
+            const saveData = (newDrugs) => {
+                setDrugs(newDrugs);
+                localStorage.setItem('lab_drugs', JSON.stringify(newDrugs));
+            };
+
+            // 检查库存警告
+            useEffect(() => {
+                const newAlerts = [];
+                drugs.forEach(drug => {
+                    // 库存预警 - 在1桶、3桶、5桶、10桶时提示
+                    if (drug.quantity <= 1) {
+                        newAlerts.push(`${drug.name} 库存极低！仅剩 ${drug.quantity} 桶！`);
+                    } else if (drug.quantity <= 3) {
+                        newAlerts.push(`${drug.name} 库存不足！仅剩 ${drug.quantity} 桶！`);
+                    } else if (drug.quantity <= 5) {
+                        newAlerts.push(`${drug.name} 库存较少，还剩 ${drug.quantity} 桶`);
+                    } else if (drug.quantity <= 10) {
+                        newAlerts.push(`${drug.name} 库存注意，还剩 ${drug.quantity} 桶`);
+                    }
+                });
+                setAlerts(newAlerts);
+            }, [drugs]);
+
+            // 处理登录
+            const handleLogin = () => {
+                if (password === USER_PASSWORD) {
+                    setIsAuthenticated(true);
+                    setPassword("");
+                } else if (password === ADMIN_PASSWORD) {
+                    setIsAuthenticated(true);
+                    setIsAdmin(true);
+                    setPassword("");
+                } else {
+                    alert("密码错误，请重新输入");
+                }
+            };
+
+            // 处理登出
+            const handleLogout = () => {
+                setIsAuthenticated(false);
+                setIsAdmin(false);
+            };
+
+            // 打开批量增加库存对话框
+            const openBulkAddDialog = (drug) => {
+                setEditingDrug(drug);
+                setBulkAddQuantity(1);
+                setBulkAddDialogOpen(true);
+            };
+
+            // 批量增加库存
+            const handleBulkAdd = () => {
+                if (bulkAddQuantity <= 0) {
+                    alert("请输入有效的数量");
+                    return;
+                }
+
+                const updatedDrugs = drugs.map(drug => {
+                    if (drug.id === editingDrug.id) {
+                        return {
+                            ...drug,
+                            quantity: drug.quantity + parseInt(bulkAddQuantity),
+                            stockAdditions: [
+                                ...drug.stockAdditions,
+                                {
+                                    date: new Date().toLocaleString('zh-CN'),
+                                    quantityAdded: parseInt(bulkAddQuantity)
+                                }
+                            ]
+                        };
+                    }
+                    return drug;
+                });
+
+                saveData(updatedDrugs);
+                setBulkAddDialogOpen(false);
+                setBulkAddQuantity(1);
+            };
+
+            // 验证管理员密码
+            const verifyAdmin = () => {
+                if (adminPassword === ADMIN_PASSWORD) {
+                    setIsAdmin(true);
+                    setAdminDialogOpen(false);
+                    setAdminPassword("");
+                    return true;
+                } else {
+                    alert("管理员密码错误");
+                    return false;
+                }
+            };
+
+            // 添加新药品
+            const addNewDrug = () => {
+                if (newDrugName.trim()) {
+                    const newDrug = {
+                        id: Date.now(),
+                        name: newDrugName.trim(),
+                        quantity: 0,
+                        conversionFactor: parseInt(newDrugConversion) || 5,
+                        accumulatedBottles: 0,
+                        refills: [],
+                        stockAdditions: []
+                    };
+                    const updatedDrugs = [...drugs, newDrug];
+                    saveData(updatedDrugs);
+                    setNewDrugName("");
+                    setNewDrugConversion(5);
+                    setOpenAddDialog(false);
+                }
+            };
+
+            // 删除药品
+            const deleteDrug = (id) => {
+                if (window.confirm("确定要删除这个药品吗？此操作不可恢复。")) {
+                    const updatedDrugs = drugs.filter(drug => drug.id !== id);
+                    saveData(updatedDrugs);
+                }
+            };
+
+            // 打开编辑换算关系对话框
+            const openEditConversionDialog = (drug) => {
+                setEditingDrug(drug);
+                setEditConversionValue(drug.conversionFactor);
+                setEditConversionDialogOpen(true);
+            };
+
+            // 处理换算关系修改
+            const handleEditConversion = () => {
+                if (editConversionValue <= 0) {
+                    alert("换算系数必须大于0");
+                    return;
+                }
+
+                const updatedDrugs = drugs.map(drug => {
+                    if (drug.id === editingDrug.id) {
+                        return {
+                            ...drug,
+                            conversionFactor: parseInt(editConversionValue)
+                        };
+                    }
+                    return drug;
+                });
+
+                saveData(updatedDrugs);
+                setEditConversionDialogOpen(false);
+            };
+
+            // 打开补充试剂对话框
+            const openRefillDialog = (drug) => {
+                setEditingDrug(drug);
+                setRefillerName("");
+                setRefillBottles(1);
+                setRefillDialogOpen(true);
+            };
+
+            // 处理试剂补充 - 支持累积计算
+            const handleRefill = () => {
+                if (!refillerName.trim()) {
+                    alert("请填写补充人员姓名");
+                    return;
+                }
+
+                if (refillBottles <= 0) {
+                    alert("请输入有效的瓶数");
+                    return;
+                }
+
+                const drug = drugs.find(d => d.id === editingDrug.id);
+                const conversionFactor = drug.conversionFactor;
+                
+                // 计算累积瓶数和需要消耗的桶数
+                const totalBottles = drug.accumulatedBottles + parseInt(refillBottles);
+                const barrelsNeeded = Math.floor(totalBottles / conversionFactor);
+                const remainingBottles = totalBottles % conversionFactor;
+                
+                if (drug.quantity < barrelsNeeded) {
+                    alert(`库存不足，需要 ${barrelsNeeded} 桶，当前只有 ${drug.quantity} 桶`);
+                    return;
+                }
+
+                const updatedDrugs = drugs.map(drug => {
+                    if (drug.id === editingDrug.id) {
+                        return {
+                            ...drug,
+                            quantity: drug.quantity - barrelsNeeded,
+                            accumulatedBottles: remainingBottles,
+                            refills: [
+                                ...drug.refills,
+                                {
+                                    date: new Date().toLocaleString('zh-CN'),
+                                    refiller: refillerName.trim(),
+                                    bottlesAdded: parseInt(refillBottles),
+                                    barrelsUsed: barrelsNeeded,
+                                    accumulatedBottles: remainingBottles
+                                }
+                            ]
+                        };
+                    }
+                    return drug;
+                });
+
+                saveData(updatedDrugs);
+                setRefillDialogOpen(false);
+                setRefillerName("");
+                setRefillBottles(1);
+            };
+
+            // 导出数据为Excel
+            const exportData = () => {
+                // 创建工作簿
+                const wb = XLSX.utils.book_new();
+                
+                // 创建药品数据工作表
+                const drugData = drugs.map(drug => ({
+                    "药品名称": drug.name,
+                    "库存(桶)": drug.quantity,
+                    "换算系数(桶:瓶)": `1:${drug.conversionFactor}`,
+                    "累积瓶数": drug.accumulatedBottles
+                }));
+                
+                const ws_drugs = XLSX.utils.json_to_sheet(drugData);
+                XLSX.utils.book_append_sheet(wb, ws_drugs, "药品库存");
+                
+                // 创建补充记录工作表
+                const refillData = [];
+                drugs.forEach(drug => {
+                    // 获取最近5次补充记录
+                    const recentRefills = drug.refills.slice(-5);
+                    recentRefills.forEach(refill => {
+                        refillData.push({
+                            "药品名称": drug.name,
+                            "补充时间": refill.date,
+                            "补充人员": refill.refiller,
+                            "补充瓶数": refill.bottlesAdded,
+                            "消耗桶数": refill.barrelsUsed,
+                            "累积剩余瓶数": refill.accumulatedBottles
+                        });
+                    });
+                });
+                
+                if (refillData.length > 0) {
+                    const ws_refills = XLSX.utils.json_to_sheet(refillData);
+                    XLSX.utils.book_append_sheet(wb, ws_refills, "最近补充记录");
+                }
+                
+                // 创建增加库存记录工作表
+                const stockAdditionData = [];
+                drugs.forEach(drug => {
+                    // 获取最近3次增加库存记录
+                    const recentAdditions = drug.stockAdditions.slice(-3);
+                    recentAdditions.forEach(addition => {
+                        stockAdditionData.push({
+                            "药品名称": drug.name,
+                            "增加时间": addition.date,
+                            "增加桶数": addition.quantityAdded
+                        });
+                    });
+                });
+                
+                if (stockAdditionData.length > 0) {
+                    const ws_additions = XLSX.utils.json_to_sheet(stockAdditionData);
+                    XLSX.utils.book_append_sheet(wb, ws_additions, "最近增加库存记录");
+                }
+                
+                // 导出文件
+                const fileName = `药品库存数据_${new Date().toLocaleDateString('zh-CN')}.xlsx`;
+                XLSX.writeFile(wb, fileName);
+            };
+
+            // 登录界面
+            if (!isAuthenticated) {
+                return (
+                    <Box className="login-container">
+                        <Paper className="login-form" elevation={3}>
+                            <Typography variant="h5" component="h2" gutterBottom align="center">
+                                二维课题组药品管理系统
+                            </Typography>
+                            <TextField
+                                fullWidth
+                                label="请输入密码"
+                                type="password"
+                                value={password}
+                                onChange={(e) => setPassword(e.target.value)}
+                                margin="normal"
+                                variant="outlined"
+                                onKeyPress={(e) => e.key === 'Enter' && handleLogin()}
+                            />
+                            <Button
+                                fullWidth
+                                variant="contained"
+                                color="primary"
+                                onClick={handleLogin}
+                                style={{ marginTop: '16px' }}
+                            >
+                                登录
+                            </Button>
+
+                            <Box mt={2} className="guide-container">
+                                <Typography variant="h6" gutterBottom>
+                                    使用说明
+                                </Typography>
+                                <Typography variant="body2">
+                                    • 系统需要密码才能访问，请联系管理员获取密码<br/>
+                                    • 普通用户可补充试剂，管理员可管理药品和库存
+                                </Typography>
+                            </Box>
+                        </Paper>
+                    </Box>
+                );
+            }
+
+            // 加载界面
+            if (loading) {
+                return (
+                    <Box className="login-container">
+                        <Box display="flex" flexDirection="column" alignItems="center">
+                            <CircularProgress size={60} />
+                            <Typography variant="h6" style={{ marginTop: '20px' }}>
+                                加载中...
+                            </Typography>
+                        </Box>
+                    </Box>
+                );
+            }
+
+            // 主界面
+            return (
+                <Box className="container">
+                    <AppBar position="static" color="primary">
+                        <Toolbar>
+                            <Typography variant="h6" component="div" sx={{ flexGrow: 1 }}>
+                                二维课题组药品管理系统
+                                {isAdmin && " (管理员模式)"}
+                            </Typography>
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                                <Chip 
+                                    label={
+                                        syncStatus === 'success' ? '已同步' :
+                                        syncStatus === 'error' ? '同步失败' : '本地模式'
+                                    }
+                                    color={
+                                        syncStatus === 'success' ? 'success' :
+                                        syncStatus === 'error' ? 'error' : 'default'
+                                    }
+                                    size="small"
+                                />
+                                <Button color="inherit" onClick={() => setShowGuide(!showGuide)}>
+                                    {showGuide ? "隐藏指南" : "显示指南"}
+                                </Button>
+                                <Button color="inherit" onClick={handleLogout} sx={{ ml: 1 }}>退出</Button>
+                            </Box>
+                        </Toolbar>
+                    </AppBar>
+
+                    {showGuide && (
+                        <Box className="guide-container">
+                            <Typography variant="h6" gutterBottom>
+                                快速使用指南
+                            </Typography>
+                            <Typography variant="body2">
+                                <strong>普通用户功能:</strong> 查看库存、补充试剂并登记<br/>
+                                <strong>管理员功能:</strong> 批量增加库存、添加新药品、删除药品、导出数据、修改换算关系<br/>
+                                <strong>补充说明:</strong> 补充试剂支持累积计算，每次补充的瓶数会累积，达到换算系数时自动减少库存
+                            </Typography>
+                            <div className="button-group">
+                                <Button 
+                                    variant="outlined" 
+                                    color="primary" 
+                                    size="small"
+                                    onClick={exportData}
+                                >
+                                    导出Excel数据
+                                </Button>
+                            </div>
+                        </Box>
+                    )}
+
+                    {alerts.length > 0 && (
+                        <Box mt={2}>
+                            {alerts.map((alert, index) => (
+                                <Alert key={index} severity={
+                                    alert.includes("极低") ? "error" : 
+                                    alert.includes("不足") ? "warning" : 
+                                    alert.includes("较少") ? "info" : "success"
+                                } sx={{ mb: 1 }}>
+                                    {alert}
+                                </Alert>
+                            ))}
+                        </Box>
+                    )}
+
+                    <Box mt={3} display="flex" justifyContent="space-between" alignItems="center" flexWrap="wrap">
+                        <Typography variant="h4" component="h1" className="header">
+                            药品库存管理
+                        </Typography>
+                        <Button 
+                            variant="contained" 
+                            color="primary" 
+                            onClick={() => setOpenAddDialog(true)}
+                            disabled={!isAdmin}
+                            sx={{ mt: { xs: 2, md: 0 } }}
+                        >
+                            添加新药品
+                        </Button>
+                    </Box>
+
+                    <div className="table-responsive">
+                        <TableContainer component={Paper} sx={{ mt: 3 }}>
+                            <Table sx={{ minWidth: 650 }} aria-label="药品库存表">
+                                <TableHead>
+                                    <TableRow>
+                                        <TableCell>药品名称</TableCell>
+                                        <TableCell align="center">库存(桶)</TableCell>
+                                        <TableCell align="center">换算关系</TableCell>
+                                        <TableCell align="center">累积瓶数</TableCell>
+                                        <TableCell align="center">操作</TableCell>
+                                        <TableCell align="center">补充记录</TableCell>
+                                        {isAdmin && <TableCell align="center">删除</TableCell>}
+                                    </TableRow>
+                                </TableHead>
+                                <TableBody>
+                                    {drugs.map((drug) => (
+                                        <TableRow 
+                                            key={drug.id}
+                                            className={
+                                                drug.quantity <= 1 ? "critical-stock" : 
+                                                drug.quantity <= 3 ? "low-stock" : ""
+                                            }
+                                        >
+                                            <TableCell component="th" scope="row">
+                                                {drug.name}
+                                            </TableCell>
+                                            <TableCell align="center">
+                                                <div className="stock-info">
+                                                    <Typography 
+                                                        variant="h6" 
+                                                        color={
+                                                            drug.quantity <= 1 ? "error" : 
+                                                            drug.quantity <= 3 ? "warning" : "textPrimary"
+                                                        }
+                                                    >
+                                                        {drug.quantity}
+                                                    </Typography>
+                                                </div>
+                                            </TableCell>
+                                            <TableCell align="center">
+                                                <Box display="flex" alignItems="center" justifyContent="center">
+                                                    <Typography variant="body2">
+                                                        1桶 = {drug.conversionFactor}瓶
+                                                    </Typography>
+                                                    {isAdmin && (
+                                                        <IconButton 
+                                                            size="small" 
+                                                            onClick={() => openEditConversionDialog(drug)}
+                                                            className="edit-conversion-btn"
+                                                        >
+                                                            <span className="material-icons" style={{ fontSize: '16px' }}>edit</span>
+                                                        </IconButton>
+                                                    )}
+                                                </Box>
+                                            </TableCell>
+                                            <TableCell align="center">
+                                                <Typography variant="body2">
+                                                    {drug.accumulatedBottles}瓶
+                                                </Typography>
+                                                <div className="accumulated-info">
+                                                    再补充{drug.conversionFactor - drug.accumulatedBottles}瓶可减少1桶库存
+                                                </div>
+                                            </TableCell>
+                                            <TableCell align="center">
+                                                <div className="button-group">
+                                                    {isAdmin && (
+                                                        <Button 
+                                                            variant="outlined" 
+                                                            color="primary" 
+                                                            size="small"
+                                                            onClick={() => openBulkAddDialog(drug)}
+                                                        >
+                                                            增加库存
+                                                        </Button>
+                                                    )}
+                                                    <Button 
+                                                        variant="outlined" 
+                                                        color="secondary" 
+                                                        size="small"
+                                                        onClick={() => openRefillDialog(drug)}
+                                                    >
+                                                        补充试剂
+                                                    </Button>
+                                                </div>
+                                            </TableCell>
+                                            <TableCell align="center">
+                                                {drug.refills.length > 0 ? (
+                                                    <Box>
+                                                        最近补充: {drug.refills[drug.refills.length - 1].date}<br/>
+                                                        由 {drug.refills[drug.refills.length - 1].refiller} 操作<br/>
+                                                        补充了 {drug.refills[drug.refills.length - 1].bottlesAdded} 瓶
+                                                    </Box>
+                                                ) : "无记录"}
+                                            </TableCell>
+                                            {isAdmin && (
+                                                <TableCell align="center">
+                                                    <Button 
+                                                        variant="outlined" 
+                                                        color="error"
+                                                        size="small"
+                                                        onClick={() => deleteDrug(drug.id)}
+                                                    >
+                                                        删除
+                                                    </Button>
+                                                </TableCell>
+                                            )}
+                                        </TableRow>
+                                    ))}
+                                </TableBody>
+                            </Table>
+                        </TableContainer>
+                    </div>
+
+                    {/* 添加新药品对话框 */}
+                    <Dialog open={openAddDialog} onClose={() => setOpenAddDialog(false)} fullWidth maxWidth="sm">
+                        <DialogTitle>添加新药品</DialogTitle>
+                        <DialogContent>
+                            <TextField
+                                autoFocus
+                                margin="dense"
+                                label="药品名称"
+                                fullWidth
+                                variant="outlined"
+                                value={newDrugName}
+                                onChange={(e) => setNewDrugName(e.target.value)}
+                                sx={{ mb: 2 }}
+                            />
+                            <TextField
+                                margin="dense"
+                                label="换算系数 (1桶 = ?瓶)"
+                                type="number"
+                                fullWidth
+                                variant="outlined"
+                                value={newDrugConversion}
+                                onChange={(e) => setNewDrugConversion(e.target.value)}
+                                onKeyPress={(e) => e.key === 'Enter' && addNewDrug()}
+                            />
+                        </DialogContent>
+                        <DialogActions>
+                            <Button onClick={() => setOpenAddDialog(false)}>取消</Button>
+                            <Button onClick={addNewDrug} color="primary">添加</Button>
+                        </DialogActions>
+                    </Dialog>
+
+                    {/* 编辑换算关系对话框 */}
+                    <Dialog open={editConversionDialogOpen} onClose={() => setEditConversionDialogOpen(false)} fullWidth maxWidth="sm">
+                        <DialogTitle>修改 {editingDrug?.name} 的换算关系</DialogTitle>
+                        <DialogContent>
+                            <TextField
+                                autoFocus
+                                margin="dense"
+                                label="换算系数 (1桶 = ?瓶)"
+                                type="number"
+                                fullWidth
+                                variant="outlined"
+                                value={editConversionValue}
+                                onChange={(e) => setEditConversionValue(e.target.value)}
+                                onKeyPress={(e) => e.key === 'Enter' && handleEditConversion()}
+                            />
+                        </DialogContent>
+                        <DialogActions>
+                            <Button onClick={() => setEditConversionDialogOpen(false)}>取消</Button>
+                            <Button onClick={handleEditConversion} color="primary">确认修改</Button>
+                        </DialogActions>
+                    </Dialog>
+
+                    {/* 补充试剂对话框 */}
+                    <Dialog open={refillDialogOpen} onClose={() => setRefillDialogOpen(false)} fullWidth maxWidth="sm">
+                        <DialogTitle>补充 {editingDrug?.name} 试剂</DialogTitle>
+                        <DialogContent>
+                            <Typography variant="body2" gutterBottom>
+                                当前换算关系: 1桶 = {editingDrug?.conversionFactor || 5}瓶
+                            </Typography>
+                            <Typography variant="body2" color="textSecondary" gutterBottom>
+                                当前累积瓶数: {editingDrug?.accumulatedBottles || 0}瓶
+                            </Typography>
+                            <TextField
+                                autoFocus
+                                margin="dense"
+                                label="补充瓶数"
+                                type="number"
+                                fullWidth
+                                variant="outlined"
+                                value={refillBottles}
+                                onChange={(e) => setRefillBottles(parseInt(e.target.value) || 0)}
+                                sx={{ mb: 2 }}
+                            />
+                            <TextField
+                                margin="dense"
+                                label="补充人员姓名"
+                                fullWidth
+                                variant="outlined"
+                                value={refillerName}
+                                onChange={(e) => setRefillerName(e.target.value)}
+                                onKeyPress={(e) => e.key === 'Enter' && handleRefill()}
+                            />
+                            {editingDrug && (
+                                <Typography variant="body2" color="textSecondary" sx={{ mt: 2 }}>
+                                    补充后将累积 {(editingDrug.accumulatedBottles || 0) + parseInt(refillBottles || 0)} 瓶，
+                                    可减少 {Math.floor(((editingDrug.accumulatedBottles || 0) + parseInt(refillBottles || 0)) / (editingDrug.conversionFactor || 5))} 桶库存
+                                </Typography>
+                            )}
+                        </DialogContent>
+                        <DialogActions>
+                            <Button onClick={() => setRefillDialogOpen(false)}>取消</Button>
+                            <Button onClick={handleRefill} color="primary">确认补充</Button>
+                        </DialogActions>
+                    </Dialog>
+
+                    {/* 批量增加库存对话框 */}
+                    <Dialog open={bulkAddDialogOpen} onClose={() => setBulkAddDialogOpen(false)} fullWidth maxWidth="sm">
+                        <DialogTitle>增加 {editingDrug?.name} 库存</DialogTitle>
+                        <DialogContent>
+                            <TextField
+                                autoFocus
+                                margin="dense"
+                                label="增加数量(桶)"
+                                type="number"
+                                fullWidth
+                                variant="outlined"
+                                value={bulkAddQuantity}
+                                onChange={(e) => setBulkAddQuantity(parseInt(e.target.value) || 0)}
+                                onKeyPress={(e) => e.key === 'Enter' && handleBulkAdd()}
+                            />
+                        </DialogContent>
+                        <DialogActions>
+                            <Button onClick={() => setBulkAddDialogOpen(false)}>取消</Button>
+                            <Button onClick={handleBulkAdd} color="primary">确认增加</Button>
+                        </DialogActions>
+                    </Dialog>
+
+                    {/* 管理员验证对话框 */}
+                    <Dialog open={adminDialogOpen} onClose={() => setAdminDialogOpen(false)} fullWidth maxWidth="sm">
+                        <DialogTitle>管理员验证</DialogTitle>
+                        <DialogContent>
+                            <TextField
+                                autoFocus
+                                margin="dense"
+                                label="请输入管理员密码"
+                                type="password"
+                                fullWidth
+                                variant="outlined"
+                                value={adminPassword}
+                                onChange={(e) => setAdminPassword(e.target.value)}
+                            />
+                        </DialogContent>
+                        <DialogActions>
+                            <Button onClick={() => setAdminDialogOpen(false)}>取消</Button>
+                            <Button onClick={verifyAdmin} color="primary">验证</Button>
+                        </DialogActions>
+                    </Dialog>
+                </Box>
+            );
+        }
+
+        // 渲染应用
+        ReactDOM.render(<App />, document.getElementById('root'));
+    </script>
+</body>
+</html>
